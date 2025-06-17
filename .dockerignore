@@ -1,0 +1,34 @@
+# Virtual environments
+env/
+.venv/
+
+# S3-mount or system folders
+DockerDesktopWSL/
+disk/
+main/
+
+# Datasets and intermediate data
+data/
+data_ingestion/
+data_processing/
+deployment/
+models/
+model_training/
+
+# Cache and Python garbage
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs and temporary files
+*.log
+*.tmp
+*.joblib
+
+# Streamlit, VS Code, Jupyter, etc.
+.vscode/
+.ipynb_checkpoints/
+
+# Node/npm leftovers (if any)
+node_modules/

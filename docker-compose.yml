@@ -1,0 +1,19 @@
+# Specifies the Docker Compose file format version.
+version: '3.8'
+
+# Defines the application's services.
+services:
+  # The main web dashboard service.
+  dashboard:
+    # Build the image from the Dockerfile in the current directory.
+    build: .
+    # Map host port 8501 to container port 8501.
+    ports:
+      - "8501:8501"
+    # Mount the local project directory into the container's /app directory.
+    volumes:
+      - .:/app
+    
+    working_dir: /app/dashboard_app
+    command: streamlit run app.py --server.runOnSave true
+  
