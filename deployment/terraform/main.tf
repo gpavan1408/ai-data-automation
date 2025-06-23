@@ -47,7 +47,6 @@ resource "aws_iam_policy" "s3_access_policy" {
         Resource = "${aws_s3_bucket.dashboard_bucket.arn}/*" # For objects inside the bucket
       },
       {
-        # --- THIS IS THE CORRECTED LINE ---
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.dashboard_bucket.arn # For the bucket itself
@@ -65,9 +64,9 @@ resource "aws_iam_role_policy_attachment" "s3_access_attachment" {
 # Uploads the Spark ETL script from our local machine to S3.
 resource "aws_s3_object" "spark_etl_script" {
   bucket = aws_s3_bucket.dashboard_bucket.id
-  key    = "scripts/spark_etl.py"
-  source = "../../data_processing/spark_jobs/spark_etl.py"
-  etag   = filemd5("../../data_processing/spark_jobs/spark_etl.py")
+  key    = "scripts/cloud_spark_etl.py" # Using the dedicated cloud script
+  source = "../../data_processing/glue_jobs/cloud_spark_etl.py"
+  etag   = filemd5("../../data_processing/glue_jobs/cloud_spark_etl.py")
 }
 
 # Creates a database in the AWS Glue Data Catalog.
@@ -84,8 +83,6 @@ resource "aws_glue_crawler" "s3_crawler" {
   s3_target {
     path = "s3://${aws_s3_bucket.dashboard_bucket.id}/processed/users/"
   }
-
-  depends_on = [aws_s3_object.spark_etl_script]
 }
 
 # Defines the Glue Job to run our Spark script in the cloud.
@@ -98,10 +95,15 @@ resource "aws_glue_job" "spark_etl_job" {
     script_location = "s3://${aws_s3_bucket.dashboard_bucket.id}/${aws_s3_object.spark_etl_script.key}"
     python_version  = "3"
   }
+  
+  # --- THIS SECTION IS NOW CORRECT ---
+  # These arguments are passed to our Python script when the job runs.
+  default_arguments = {
+    "--S3_INPUT_PATH"  = "s3://${aws_s3_bucket.dashboard_bucket.id}/raw/api_users_data.json"
+    "--S3_OUTPUT_PATH" = "s3://${aws_s3_bucket.dashboard_bucket.id}/processed/users/"
+  }
 
   glue_version      = "4.0"
   worker_type       = "G.1X"
   number_of_workers = 5
 }
-
- 
