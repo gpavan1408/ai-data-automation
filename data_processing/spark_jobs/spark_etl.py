@@ -5,11 +5,8 @@ import sys
 def setup_spark_environment():
     print("Configuring environment for Spark...")
 
-    # Hardcoded correct paths (no need for java_home / hadoop_home variables)
     os.environ['JAVA_HOME'] = 'C:\\Program Files\\Amazon Corretto\\jdk11.0.27.6.1'
     os.environ['HADOOP_HOME'] = 'C:\\Hadoop'
-
-    # Add them to PATH for this process
     os.environ["PATH"] = f"{os.environ['JAVA_HOME']}\\bin;{os.environ['HADOOP_HOME']}\\bin;{os.environ['PATH']}"
 
     print(f"JAVA_HOME set to: {os.environ['JAVA_HOME']}")
@@ -31,19 +28,30 @@ def process_data_with_spark():
         .config("spark.driver.host", "127.0.0.1") \
         .getOrCreate()
 
+    # Define input/output paths
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     INPUT_PATH = os.path.join(PROJECT_ROOT, "data", "raw", "api_users_data.json")
     OUTPUT_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
-    OUTPUT_FILE = os.path.join(OUTPUT_DIR, "users.parquet")
+    OUTPUT_FILE = os.path.join(OUTPUT_DIR, "users")
 
     print(f"Reading raw data from {INPUT_PATH}")
     df = spark.read.option("multiLine", True).json(INPUT_PATH)
 
     print("Transforming data with Spark...")
     df_transformed = df.select(
-        col("id"), col("name"), col("username"), col("email"), 
-        col("phone"), col("website"), col("company.name").alias("company_name")
+        col("id"),
+        col("name"),
+        col("username"),
+        col("email"),
+        col("phone"),
+        col("website"),
+        col("company.name").alias("company_name")
     )
+
+    # 🧪 Debugging: Show record count and preview
+    total_records = df_transformed.count()
+    print(f"\n✅ Total transformed records: {total_records}\n")
+    df_transformed.show(5, truncate=False)
 
     print(f"Saving processed data to {OUTPUT_FILE}")
     df_transformed.write.mode("overwrite").parquet(OUTPUT_FILE)

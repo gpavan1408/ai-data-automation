@@ -29,7 +29,7 @@ def load_data():
 df = load_data()
 
 # --- Main Dashboard Title ---
-st.title("🤖 AI Dashboard Automation Project")
+st.title("🤖 AI Dashboard Automation")
 
 # --- Sidebar for Filters ---
 st.sidebar.header("Filter Options")
