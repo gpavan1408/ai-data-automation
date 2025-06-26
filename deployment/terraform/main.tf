@@ -8,11 +8,11 @@ resource "aws_s3_bucket" "dashboard_bucket" {
   bucket = "automation-ai-dashboard-bucket-2025"
 }
 
-# Defines the IAM Role that AWS Glue will use for permissions.
+# Defines the IAM Role that AWS Glue will use for its own operations.
 resource "aws_iam_role" "glue_service_role" {
   name = "AI-Dashboard-Glue-Service-Role"
 
-  # Trust policy allowing the Glue service to assume this role.
+  # Trust policy allowing ONLY the Glue service to use this role.
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [
@@ -96,8 +96,6 @@ resource "aws_glue_job" "spark_etl_job" {
     python_version  = "3"
   }
   
-  # --- THIS SECTION IS NOW CORRECT ---
-  # These arguments are passed to our Python script when the job runs.
   default_arguments = {
     "--S3_INPUT_PATH"  = "s3://${aws_s3_bucket.dashboard_bucket.id}/raw/api_users_data.json"
     "--S3_OUTPUT_PATH" = "s3://${aws_s3_bucket.dashboard_bucket.id}/processed/users/"
@@ -106,4 +104,77 @@ resource "aws_glue_job" "spark_etl_job" {
   glue_version      = "4.0"
   worker_type       = "G.1X"
   number_of_workers = 5
+}
+
+# --- EventBridge Automation Section ---
+
+# This policy gives permission to START a crawler.
+resource "aws_iam_policy" "start_crawler_policy" {
+  name   = "AI-Dashboard-Start-Crawler-Policy"
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "glue:StartCrawler"
+      Resource = aws_glue_crawler.s3_crawler.arn
+    }]
+  })
+}
+
+# This is a NEW, DEDICATED role for EventBridge to use.
+resource "aws_iam_role" "eventbridge_glue_role" {
+  name = "AI-Dashboard-EventBridge-Glue-Role"
+
+  # This role can ONLY be assumed by the EventBridge service.
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+    }]
+  })
+}
+
+# Attaches the "start crawler" policy to our new EventBridge role.
+resource "aws_iam_role_policy_attachment" "eventbridge_start_crawler_attachment" {
+  role       = aws_iam_role.eventbridge_glue_role.name
+  policy_arn = aws_iam_policy.start_crawler_policy.arn
+}
+
+# This defines the rule that listens for a successful Glue job run.
+resource "aws_cloudwatch_event_rule" "run_crawler_on_job_success" {
+  name        = "RunCrawlerAfterGlueJobSuccess"
+  description = "Triggers the Glue Crawler when the ETL job succeeds"
+
+  event_pattern = jsonencode({
+    source      = ["aws.glue"],
+    "detail-type" = ["Glue Job State Change"],
+    detail      = {
+      jobName = [aws_glue_job.spark_etl_job.name],
+      state   = ["SUCCEEDED"]
+    }
+  })
+}
+
+# EventBridge target updated to invoke Lambda, not Glue Crawler
+resource "aws_cloudwatch_event_target" "trigger_lambda_target" {
+  rule      = aws_cloudwatch_event_rule.run_crawler_on_job_success.name
+  arn       = "arn:aws:lambda:us-east-1:654654515599:function:Start-Crawler-Lambda"
+  role_arn  = aws_iam_role.eventbridge_glue_role.arn
+}
+
+
+
+output "glue_crawler_arn_debug" {
+  value = aws_glue_crawler.s3_crawler.arn
+}
+
+# Grant EventBridge permission to invoke the Lambda
+resource "aws_lambda_permission" "allow_eventbridge_to_invoke_lambda" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = "S3-Ingestion-Trigger"  # OR use aws_lambda_function.<name>.function_name if you created Lambda in Terraform
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.run_crawler_on_job_success.arn
 }

@@ -1,10 +1,9 @@
 import sys
+import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
 from awsglue.utils import getResolvedOptions
 
 # --- Get Job Arguments from AWS Glue ---
-# This special Glue utility reads arguments passed to the job when it runs.
 args = getResolvedOptions(sys.argv, [
     'S3_INPUT_PATH',
     'S3_OUTPUT_PATH'
@@ -13,32 +12,70 @@ s3_input_path = args['S3_INPUT_PATH']
 s3_output_path = args['S3_OUTPUT_PATH']
 
 
-# --- Spark Application ---
-def process_data_with_spark():
+def process_generic_data():
     """
-    Initializes a Spark session, reads raw data from a given S3 path, 
-    transforms it, and saves it to a given S3 output path.
+    Reads any supported file format (CSV, JSON, Parquet) from S3,
+    logs its schema, and saves it as Parquet without errors.
     """
-    print("Initializing Spark session in the cloud...")
-    spark = SparkSession.builder.appName("AI-Dashboard-Cloud-ETL").getOrCreate()
+    print("Initializing generic Spark ETL job...")
+    spark = SparkSession.builder.appName("Generic-Cloud-ETL").getOrCreate()
 
-    # The script now uses the S3 path it received as an argument.
+    # --- 1. DYNAMICALLY READ DATA ---
     print(f"Reading raw data from {s3_input_path}")
-    df = spark.read.option("multiLine", True).json(s3_input_path)
+    file_format = s3_input_path.split('.')[-1].lower()
 
-    print("Transforming data...")
-    df_transformed = df.select(
-        col("id"), col("name"), col("username"), col("email"), 
-        col("phone"), col("website"), col("company.name").alias("company_name")
-    )
+    try:
+        if file_format == 'json':
+            df = spark.read.option("multiLine", True).json(s3_input_path)
+        elif file_format == 'csv':
+            df = spark.read.option("header", True).option("inferSchema", True).csv(s3_input_path)
+        elif file_format == 'parquet':
+            df = spark.read.parquet(s3_input_path)
+        else:
+            raise ValueError(f"Unsupported file format: {file_format}")
+    except Exception as e:
+        print(f"❌ ERROR: Failed to read input file. It might be corrupted or in the wrong format.")
+        print(e)
+        sys.exit(1)
+
+    # --- 2. LOG SCHEMA AND VALIDATE ---
+    print("\n--- Inferred Input Schema ---")
+    df.printSchema()
+
+    input_count = df.count()
+    print(f"Input record count: {input_count}")
+    if input_count == 0:
+        print("❌ ERROR: Input file contains no data. Aborting job.")
+        sys.exit(1)
+
+    # --- 3. DYNAMIC TRANSFORMATION ---
+    print("\nPerforming generic transformation (ensuring clean column names)...")
     
-    # The script now writes the output directly back to S3.
-    print(f"Saving processed data to {s3_output_path}")
-    df_transformed.write.mode("overwrite").parquet(s3_output_path)
+    # This is a generic transformation that works on ANY DataFrame.
+    # It replaces characters that are not allowed in Parquet column names.
+    cleaned_columns = [c.replace(' ', '_').replace(';', '').replace('}', '').replace('{', '').replace(')', '').replace('(', '').replace('=', '') for c in df.columns]
+    df_transformed = df.toDF(*cleaned_columns)
 
-    print("✅ Cloud Spark ETL job complete.")
+    print("\n--- Output Data Schema ---")
+    df_transformed.printSchema()
+    
+    # --- 4. LOAD ---
+    print(f"\nSaving processed data to {s3_output_path}")
+    # We will save the output in a sub-folder named after the original file to keep things organized
+    # output_filename = os.path.basename(s3_input_path)
+    # final_output_path = os.path.join(s3_output_path, output_filename)
+    # df_transformed.write.mode("overwrite").parquet(s3_output_path)
+
+    # print(f"✅ Generic ETL job complete. Output saved to {final_output_path}")
+    # spark.stop()
+
+    
+    print(f"\nSaving processed data to {s3_output_path}")
+    df_transformed.write.mode("overwrite").parquet(s3_output_path)
+    print(f"✅ Generic ETL job complete. Output saved to {s3_output_path}")
     spark.stop()
 
 
+
 if __name__ == "__main__":
-    process_data_with_spark()
+    process_generic_data()
